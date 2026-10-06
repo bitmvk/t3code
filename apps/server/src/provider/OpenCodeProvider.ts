@@ -384,7 +384,36 @@ export interface OpenCode2Model {
   readonly id: string;
   readonly name: string;
   readonly variants: ReadonlyArray<{ readonly id: string }>;
+  /** The upstream provider's display name, which tells same-named models apart. */
+  readonly providerName?: string | undefined;
 }
+
+/**
+ * Labels each listed model with its upstream provider's display name. The name
+ * only labels picker rows, so a failed provider list leaves the models unlabeled
+ * instead of failing the catalog.
+ */
+export const listOpenCode2Models = <E, F>(
+  models: Effect.Effect<ReadonlyArray<OpenCode2Model>, E>,
+  providers: Effect.Effect<ReadonlyArray<{ readonly id: string; readonly name: string }>, F>,
+) =>
+  Effect.all(
+    [
+      models,
+      providers.pipe(
+        Effect.tapError((cause) => Effect.logWarning("OpenCode 2 provider list failed", cause)),
+        Effect.orElseSucceed(
+          (): ReadonlyArray<{ readonly id: string; readonly name: string }> => [],
+        ),
+      ),
+    ],
+    { concurrency: "unbounded" },
+  ).pipe(
+    Effect.map(([models, providers]) => {
+      const names = new Map(providers.map((provider) => [provider.id, provider.name]));
+      return models.map((model) => ({ ...model, providerName: names.get(model.providerID) }));
+    }),
+  );
 
 /**
  * A server loads its catalog lazily and lists nothing for its first few
@@ -544,10 +573,14 @@ const checkOpenCode2 = Effect.fn("checkOpenCode2")(function* (
       .map((model) => ({
         slug: `${model.providerID}/${model.id}`,
         name: model.name,
+        subProvider: nonEmptyTrimmed(model.providerName) ?? model.providerID,
         isCustom: false,
         capabilities: openCode2ModelCapabilities(model),
       }))
-      .toSorted((left, right) => left.name.localeCompare(right.name)),
+      .toSorted(
+        (left, right) =>
+          left.name.localeCompare(right.name) || left.subProvider.localeCompare(right.subProvider),
+      ),
     settings.customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   );

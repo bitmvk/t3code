@@ -37,6 +37,7 @@ import { ProviderDriverError } from "../Errors.ts";
 import { readOpenCodeGoUsageLimits } from "../openCodeUsageLimits.ts";
 import {
   checkOpenCodeProviderStatus,
+  listOpenCode2Models,
   loadOpenCode2Workspace,
   makeOpenCode2ModelLoader,
   makePendingOpenCodeProvider,
@@ -300,19 +301,23 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         ),
       });
       const loadOpenCode2Models = yield* makeOpenCode2ModelLoader(
-        openCode2Server.withConnection((connection) =>
-          connection.client.model.list({ location: { directory: serverConfig.cwd } }).pipe(
-            Effect.map((models) => models.data),
-            Effect.mapError(
-              (cause) =>
-                new OpenCodeRuntime.OpenCodeRuntimeError({
-                  operation: "model.list",
-                  detail: "The OpenCode server could not list its models.",
-                  cause,
-                }),
+        openCode2Server.withConnection(({ client }) => {
+          const location = { directory: serverConfig.cwd };
+          return listOpenCode2Models(
+            client.model.list({ location }).pipe(
+              Effect.map((models) => models.data),
+              Effect.mapError(
+                (cause) =>
+                  new OpenCodeRuntime.OpenCodeRuntimeError({
+                    operation: "model.list",
+                    detail: "The OpenCode server could not list its models.",
+                    cause,
+                  }),
+              ),
             ),
-          ),
-        ),
+            client.provider.list({ location }).pipe(Effect.map((providers) => providers.data)),
+          );
+        }),
       );
       // A 2.x server lists skills and commands per directory, so one server
       // answers every workspace. Its event stream says when a directory it had

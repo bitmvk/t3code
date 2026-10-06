@@ -19,6 +19,7 @@ import * as OpenCodeRuntime from "./opencodeRuntime.ts";
 import * as OpenCodeServerOwner from "./OpenCodeServerOwner.ts";
 import {
   checkOpenCodeProviderStatus,
+  listOpenCode2Models,
   loadOpenCode2Workspace,
   makeOpenCode2ModelLoader,
   type OpenCode2Model,
@@ -587,6 +588,33 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
     }),
   );
 
+  it.effect("labels same-named OpenCode 2 models with their upstream provider", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.versionStdout = "opencode v2.0.18\n";
+      const snapshot = yield* checkProvider(
+        makeOpenCodeSettings(),
+        process.cwd(),
+        undefined,
+        undefined,
+        Effect.succeed([
+          { providerID: "zen", id: "grok", name: "Grok", variants: [], providerName: "Zen" },
+          { providerID: "go", id: "grok", name: "Grok", variants: [], providerName: "OpenCode Go" },
+          // A provider the provider list did not name falls back to its ID.
+          { providerID: "cline-pass", id: "grok", name: "Grok", variants: [] },
+        ]),
+      );
+
+      NodeAssert.deepEqual(
+        snapshot.models.map((model) => [model.slug, model.subProvider]),
+        [
+          ["cline-pass/grok", "cline-pass"],
+          ["go/grok", "OpenCode Go"],
+          ["zen/grok", "Zen"],
+        ],
+      );
+    }),
+  );
+
   it.effect("reports a failed OpenCode 2 model list without the server's response", () =>
     Effect.gen(function* () {
       runtimeMock.state.versionStdout = "opencode v2.0.18\n";
@@ -803,6 +831,24 @@ it.effect("keeps the last OpenCode 2 model list while a fresh server's stays emp
     yield* TestClock.adjust("6 seconds");
     NodeAssert.deepEqual(yield* Fiber.join(fiber), [bigPickle]);
   }).pipe(Effect.provide(TestClock.layer())),
+);
+
+it.effect(
+  "names each OpenCode 2 model's provider, and lists models without names if that fails",
+  () =>
+    Effect.gen(function* () {
+      const named = yield* listOpenCode2Models(
+        Effect.succeed([bigPickle]),
+        Effect.succeed([{ id: "opencode", name: "OpenCode Zen" }]),
+      );
+      NodeAssert.deepEqual(named, [{ ...bigPickle, providerName: "OpenCode Zen" }]);
+
+      const unnamed = yield* listOpenCode2Models(
+        Effect.succeed([bigPickle]),
+        Effect.fail("provider list unavailable"),
+      );
+      NodeAssert.deepEqual(unnamed, [{ ...bigPickle, providerName: undefined }]);
+    }),
 );
 
 // What 2.0.18 lists for a directory once it has scanned it (live, 2026-09-29).
